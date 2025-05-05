@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId  # needed to convert MongoDB _id to string, used in get_all_users()
 from werkzeug.security import generate_password_hash, check_password_hash
-from models_fast import get_mongo_collections
+from models_MongoDB import get_mongo_collections
 import jwt
 import re
 import time
