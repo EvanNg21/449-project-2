@@ -92,12 +92,10 @@ def get_db():
 
 @app.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    # Validate email format
     email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
     if not re.match(email_regex, user.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
 
-    # Validate password strength
     if len(user.password) < 8 or not re.search(r'\d', user.password) or not re.search(r'[A-Z]', user.password) or not re.search(r'[a-z]', user.password) or not re.search(r'[\W_]', user.password):
         raise HTTPException(status_code=400, detail="Password must be strong")
 
@@ -136,9 +134,9 @@ def login(user: UserLogin, request: Request, response: Response, db: Session = D
         key="access_token",
         value=f"Bearer {token}",
         httponly=True,
-        max_age=1800,  # 30 minutes
-        secure=False,  # Set to True in production (HTTPS only)
-        samesite="lax",  # Prevents CSRF attacks
+        max_age=1800,  
+        secure=False, 
+        samesite="lax", 
     )
     return {"message":"Logged in successfully", "token": token}
 
