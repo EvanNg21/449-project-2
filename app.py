@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from models import User, InventoryItem, Base
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -8,20 +8,27 @@ from models import User
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import re
+from starlette.middleware.sessions import SessionMiddleware
+
 
 DATABASE_URL = 'mysql+mysqlconnector://root:evan3610@localhost/freshmart'
+
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key='your_secret_key')
 
 Base.metadata.create_all(bind=engine)
 
 JWT_SECRET_KEY = 'jwt_secret_key'
 user_token = ""
+
+class TokenRequest(BaseModel):
+    token: str
 
 # ------------------------------------------------------------
 # Models
@@ -42,6 +49,33 @@ class InventoryItemCreate(BaseModel):
     description: str
     quantity: int
     price: float
+    @field_validator('name')
+    def name_must_be_string(cls, v):
+        if isinstance(v, int) or v.isdigit():
+            raise ValueError("Name cannot be a number")
+        return v
+    
+    @field_validator('description')
+    def description_must_be_string(cls, v):
+        if isinstance(v, int) or v.isdigit():
+            raise ValueError("Description cannot be a number")
+        return v
+
+    @field_validator('price')
+    def price_must_be_positive(cls, v):
+        if not isinstance(v, float):
+            raise ValueError("price must be an float")
+        if v <= 0:
+            raise ValueError("Price must be positive")
+        return v
+
+    @field_validator('quantity')
+    def quantity_must_be_positive_integer(cls, v):
+        if not isinstance(v, int):
+            raise ValueError("Quantity must be an integer")
+        if v < 0:
+            raise ValueError("Quantity cannot be negative")
+        return v
 
 # ------------------------------------------------------------
 # Dependency
@@ -81,28 +115,40 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return {"message": "User registered successfully!"}
 
 @app.post("/login")
-def login(user: UserLogin, db: Session = Depends(get_db)):
+def login(user: UserLogin, request: Request, response: Response, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username).first()
     if not db_user or not check_password_hash(db_user.password_hash, user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    global user_token
-    user_token = jwt.encode({"username": db_user.username, "role": db_user.role, "id": db_user.id, "exp": datetime.utcnow() + timedelta(minutes=30)}, JWT_SECRET_KEY, algorithm="HS256")
-    return {"access_token": user_token, "token_type": "bearer"}
+    token = jwt.encode(
+        {
+            "username": db_user.username,
+            "role": db_user.role,
+            "id": db_user.id,
+            "exp": datetime.utcnow() + timedelta(minutes=30),
+        },
+        JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    
+    request.session['user_id'] = db_user.id
+    request.session['token'] = token
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {token}",
+        httponly=True,
+        max_age=1800,  # 30 minutes
+        secure=False,  # Set to True in production (HTTPS only)
+        samesite="lax",  # Prevents CSRF attacks
+    )
+    return {"message":"Logged in successfully", "token": token}
 
 @app.post("/logout")
-def logout(token: str):
-    try:
-       
-        jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
-        
-        global user_token
-        user_token = ""
-        return {"message": "Logged out successfully. Please discard your token."}
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+def logout(request: Request, response: Response):
+    request.session.clear()
+    response.delete_cookie("session_id")
+    return {"message": "Logged out successfully"}
 
 class UserResponse(BaseModel):
     id: int
@@ -121,39 +167,60 @@ def get_users(db: Session = Depends(get_db)):
 # ------------------------------------------------------------
 # Inventory Management (JWT-protected)
 # ------------------------------------------------------------
+def get_current_user(request: Request):
+    user_id = request.session.get('user_id')
+    token = request.session.get('token')
+    if not user_id or not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-def jwt_required(token: str):
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
+        raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/inventory/create")
-def create_inventory_item(item: InventoryItemCreate, token: str, db: Session = Depends(get_db)):
-    current_user = jwt_required(token)
-    
-    new_item = InventoryItem(name=item.name, description=item.description, quantity=item.quantity, price=item.price, user_id=current_user['id'])
+def create_inventory_item(
+    item: InventoryItemCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    new_item = InventoryItem(
+        name=item.name,
+        description=item.description,
+        quantity=item.quantity,
+        price=item.price,
+        user_id=current_user['id']
+    )
     db.add(new_item)
     db.commit()
-
     return {"message": "Inventory item created"}
 
 @app.get("/inventory")
-def get_inventory(token: str, db: Session = Depends(get_db)):
-    current_user = jwt_required(token)
+def get_inventory(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     if current_user['role'] == 'admin':
         items = db.query(InventoryItem).all()
     else:
-        items = db.query(InventoryItem).filter(InventoryItem.user_id == current_user['id']).all()
-
+        items = db.query(InventoryItem).filter(
+            InventoryItem.user_id == current_user['id']
+        ).all()
     return items
 
 @app.put("/admin/inventory/{item_id}")
-def update_inventory_item(item_id: int, item: InventoryItemCreate, token: str, db: Session = Depends(get_db)):
-    current_user = jwt_required(token)
+def update_inventory_item(
+    item_id: int,
+    item: InventoryItemCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Admins only")
 
@@ -166,12 +233,15 @@ def update_inventory_item(item_id: int, item: InventoryItemCreate, token: str, d
     db_item.quantity = item.quantity
     db_item.price = item.price
     db.commit()
-
     return {"message": "Inventory item updated"}
 
 @app.delete("/admin/inventory/{item_id}")
-def delete_inventory_item(item_id: int, token: str, db: Session = Depends(get_db)):
-    current_user = jwt_required(token)
+def delete_inventory_item(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     if current_user['role'] != 'admin':
         raise HTTPException(status_code=403, detail="Admins only")
 
@@ -181,5 +251,4 @@ def delete_inventory_item(item_id: int, token: str, db: Session = Depends(get_db
 
     db.delete(db_item)
     db.commit()
-
     return {"message": "Inventory item deleted"}
