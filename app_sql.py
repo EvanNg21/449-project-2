@@ -1,9 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from models_sql import User, InventoryItem, Base
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
@@ -121,15 +120,14 @@ def login(user: UserLogin, request: Request, response: Response, db: Session = D
             "username": db_user.username,
             "role": db_user.role,
             "id": db_user.id,
-            "exp": datetime.utcnow() + timedelta(minutes=30),
+            "exp": datetime.now(datetime.timezone.utc) + timedelta(minutes=30),
         },
         JWT_SECRET_KEY,
         algorithm="HS256",
     )
-
-    
     request.session['user_id'] = db_user.id
     request.session['token'] = token
+    request.session['login_time'] = datetime.now(datetime.timezone.utc)
     response.set_cookie(
         key="access_token",
         value=f"Bearer {token}",
