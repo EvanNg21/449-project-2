@@ -1,0 +1,12 @@
+fastapi
+bson
+werkzeug
+pymongo
+jwt
+'pydantic[email]'
+pyJWT
+uvicorn
+sqlalchemy
+itsdangerous
+databases
+mysql-connector
