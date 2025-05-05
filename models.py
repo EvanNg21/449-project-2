@@ -22,3 +22,4 @@ class InventoryItem(Base):
     quantity = Column(Integer)
     price = Column(Float)
     user_id = Column(Integer, ForeignKey('users.id'))
+    

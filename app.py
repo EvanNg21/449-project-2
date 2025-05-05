@@ -20,7 +20,7 @@ app = FastAPI()
 
 Base.metadata.create_all(bind=engine)
 
-JWT_SECRET_KEY = 'your_jwt_secret_key'
+JWT_SECRET_KEY = 'jwt_secret_key'
 user_token = ""
 
 # ------------------------------------------------------------
