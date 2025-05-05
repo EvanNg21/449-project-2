@@ -1,19 +1,24 @@
-from flask_sqlalchemy import SQLAlchemy
+# models.py
+from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import declarative_base
 
-db = SQLAlchemy()
+Base = declarative_base()
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), nullable=False, unique=True)
-    password_hash = db.Column(db.String(512), nullable=False)
-    email = db.Column(db.String(150), nullable=False, unique=True)
-    role = db.Column(db.String(20), default='user', nullable=False)
-
-class InventoryItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(150), nullable=False)
-    description = db.Column(db.String(150), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+class User(Base):
+    __tablename__ = 'users'
     
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True)
+    password_hash = Column(String(255))
+    email = Column(String(100), unique=True, index=True)
+    role = Column(String(20), default='user')
+
+class InventoryItem(Base):
+    __tablename__ = 'inventory_items'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100))
+    description = Column(String(255))
+    quantity = Column(Integer)
+    price = Column(Float)
+    user_id = Column(Integer, ForeignKey('users.id'))
